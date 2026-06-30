@@ -53,6 +53,11 @@ def get_spark_properties():
         if val is not None:
             props[f"spark.executorEnv.{key}"] = val
             props[f"spark.yarn.appMasterEnv.{key}"] = val
+            
+    # Add memory configurations to avoid driver OOM when using toPandas()
+    props["spark.driver.memory"] = "4g"
+    props["spark.driver.maxResultSize"] = "2g"
+    
     return props
 
 SPARK_PROPS = get_spark_properties()
