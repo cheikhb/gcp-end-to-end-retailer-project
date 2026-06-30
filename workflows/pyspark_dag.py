@@ -36,7 +36,7 @@ load_env()
 
 # define the variables
 PROJECT_ID = os.getenv("PROJECT_ID", "data-analysis-303816")
-REGION = os.getenv("REGION", "us-east1")
+REGION = os.getenv("REGION", "us-central1")
 CLUSTER_NAME = os.getenv("CLUSTER_NAME", "my-demo-cluster")
 COMPOSER_BUCKET = os.getenv("COMPOSER_BUCKET", "us-central1-demo-instance-d71d5ec5-bucket")
 
