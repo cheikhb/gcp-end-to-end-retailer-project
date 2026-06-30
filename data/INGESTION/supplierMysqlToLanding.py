@@ -212,15 +212,28 @@ def extract_and_save_to_landing(table, load_type, watermark_col):
                 .load())
         log_event("SUCCESS", f"✅ Successfully extracted data from {table}", table=table)
 
-        pandas_df = df.toPandas()
-        json_data = pandas_df.to_json(orient="records", lines=True)
-
         today = datetime.datetime.today().strftime('%d%m%Y')
         JSON_FILE_PATH = f"landing/supplier-db/{table}/{table}_{today}.json"
-
+        if "supplier" in GCS_BUCKET or "supplier" in file_path: # Ensure supplier uses right path
+            JSON_FILE_PATH = f"landing/supplier-db/{table}/{table}_{today}.json"
+            
+        # Write using Spark to a temporary directory to avoid OOM
+        temp_dir = f"gs://{GCS_BUCKET}/temp/{table}_{today}_tmp/"
+        df.coalesce(1).write.mode("overwrite").json(temp_dir)
+        
+        # Find the part-00000 file and rename it
         bucket = storage_client.bucket(GCS_BUCKET)
-        blob = bucket.blob(JSON_FILE_PATH)
-        blob.upload_from_string(json_data, content_type="application/json")
+        blobs = list(bucket.list_blobs(prefix=f"temp/{table}_{today}_tmp/"))
+        part_files = [b for b in blobs if b.name.endswith(".json") and "part-" in b.name]
+        
+        if part_files:
+            part_file = part_files[0]
+            final_blob = bucket.blob(JSON_FILE_PATH)
+            bucket.copy_blob(part_file, bucket, final_blob.name)
+            
+        # Clean up temp directory
+        for b in blobs:
+            b.delete()
 
         log_event("SUCCESS", f"✅ JSON file successfully written to gs://{GCS_BUCKET}/{JSON_FILE_PATH}", table=table)
 
@@ -253,4 +266,3 @@ save_logs_to_gcs()
 save_logs_to_bigquery()
 
 print("✅ Pipeline completed successfully!")
-

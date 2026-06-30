@@ -107,6 +107,41 @@ def update_notebook(file_path):
                 new_mysql = 'MYSQL_CONFIG = {\n    "url": os.getenv("SUPPLIER_MYSQL_URL", "jdbc:mysql://34.172.69.91:3306/supplierDB?useSSL=true&requireSSL=true&verifyServerCertificate=false&allowPublicKeyRetrieval=true&connectTimeout=10000&socketTimeout=30000"),\n    "driver": os.getenv("SUPPLIER_MYSQL_DRIVER", "com.mysql.cj.jdbc.Driver"),\n    "user": os.getenv("SUPPLIER_MYSQL_USER", "cheikh"),\n    "password": os.getenv("SUPPLIER_MYSQL_PASSWORD", "c12081987B@")\n}'
                 updated_source = updated_source.replace(old_mysql, new_mysql)
 
+            # Do replacements for BOTH retailer and supplier to fix OOM in toPandas
+            if "retailerMysqlToLanding" in file_path or "supplierMysqlToLanding" in file_path:
+                old_pandas = '        pandas_df = df.toPandas()\n        json_data = pandas_df.to_json(orient="records", lines=True)\n\n        today = datetime.datetime.today().strftime(\'%d%m%Y\')\n        JSON_FILE_PATH = f"landing/retailer-db/{table}/{table}_{today}.json"\n\n        bucket = storage_client.bucket(GCS_BUCKET)\n        blob = bucket.blob(JSON_FILE_PATH)\n        blob.upload_from_string(json_data, content_type="application/json")'
+                
+                # if it's supplier, the path is different
+                if "supplierMysqlToLanding" in file_path:
+                    old_pandas = old_pandas.replace('landing/retailer-db', 'landing/supplier-db')
+                
+                new_spark_write = '''        today = datetime.datetime.today().strftime('%d%m%Y')
+        JSON_FILE_PATH = f"landing/retailer-db/{table}/{table}_{today}.json"
+        if "supplier" in GCS_BUCKET or "supplier" in file_path: # Ensure supplier uses right path
+            JSON_FILE_PATH = f"landing/supplier-db/{table}/{table}_{today}.json"
+            
+        # Write using Spark to a temporary directory to avoid OOM
+        temp_dir = f"gs://{GCS_BUCKET}/temp/{table}_{today}_tmp/"
+        df.coalesce(1).write.mode("overwrite").json(temp_dir)
+        
+        # Find the part-00000 file and rename it
+        bucket = storage_client.bucket(GCS_BUCKET)
+        blobs = list(bucket.list_blobs(prefix=f"temp/{table}_{today}_tmp/"))
+        part_files = [b for b in blobs if b.name.endswith(".json") and "part-" in b.name]
+        
+        if part_files:
+            part_file = part_files[0]
+            final_blob = bucket.blob(JSON_FILE_PATH)
+            bucket.copy_blob(part_file, bucket, final_blob.name)
+            
+        # Clean up temp directory
+        for b in blobs:
+            b.delete()'''
+                if "supplierMysqlToLanding" in file_path:
+                    new_spark_write = new_spark_write.replace('landing/retailer-db', 'landing/supplier-db')
+                    
+                updated_source = updated_source.replace(old_pandas, new_spark_write)
+
             # Prepend env loading logic to the first cell
             if prepend_env:
                 updated_source = LOAD_ENV_CODE + "\n" + updated_source
